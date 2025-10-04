@@ -1,0 +1,528 @@
+
+
+```{r}
+# Load necessary libraries
+library(dplyr)
+library(tidyr)  # Load tidyr for the spread function
+library(ggplot2)
+
+# Load the dataset
+# Assuming the dataset is saved as 'diabetes_data_upload.csv'
+data <- read.csv("C:/Users/Sourav/Downloads/diabetes_data_upload.csv")
+
+# View the first few rows of the dataset
+head(data)
+
+# Calculate prior probabilities
+prior_counts <- data %>%
+  dplyr::group_by(class) %>%
+  dplyr::summarise(count = n()) %>%
+  dplyr::mutate(prior = count / sum(count))
+
+# Print prior probabilities
+print(prior_counts)
+
+# Calculate posterior probabilities using Bayes' theorem
+# For this example, let's calculate the posterior for the feature 'Polyuria'
+# Assuming we want to find P(class | Polyuria = Yes)
+
+# Calculate likelihoods
+likelihood_counts <- data %>%
+  dplyr::group_by(Polyuria, class) %>%
+  dplyr::summarise(count = n()) %>%
+  tidyr::spread(class, count, fill = 0) %>%
+  dplyr::mutate(likelihood_yes = Positive / (Positive + Negative),
+                likelihood_no = Negative / (Positive + Negative))
+
+# Calculate posterior probabilities
+posterior <- likelihood_counts %>%
+  dplyr::mutate(posterior_yes = (likelihood_yes * prior_counts$prior[1]) / 
+                  (likelihood_yes * prior_counts$prior[1] + likelihood_no * prior_counts$prior[2]),
+                posterior_no = (likelihood_no * prior_counts$prior[2]) / 
+                  (likelihood_yes * prior_counts$prior[1] + likelihood_no * prior_counts$prior[2]))
+
+# Print posterior probabilities
+print(posterior)
+
+# Visualization of prior and posterior probabilities
+# Combine prior and posterior data for visualization
+prior_posterior <- prior_counts %>%
+  dplyr::rename(Probability = prior) %>%
+  dplyr::mutate(Type = "Prior") %>%
+  dplyr::bind_rows(posterior %>%
+                     dplyr::select(Polyuria, posterior_yes) %>%
+                     dplyr::rename(Probability = posterior_yes) %>%
+                     dplyr::mutate(Type = "Posterior"))
+
+# Plotting
+ggplot(prior_posterior, aes(x = Polyuria, y = Probability, fill = Type)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  labs(title = "Prior and Posterior Probabilities for Polyuria",
+       x = "Polyuria",
+       y = "Probability") +
+  theme_minimal() +
+  scale_fill_manual(values = c("Prior" = "blue", "Posterior" = "orange"))
+```
+```{r}
+data
+```
+
+```{r}
+# Load necessary libraries
+library(dplyr)
+library(tidyr)  # Load tidyr for the spread function
+library(ggplot2)
+
+# Load the dataset
+# Assuming the dataset is saved as 'diabetes_data_upload.csv'
+data <- read.csv("C:/Users/Sourav/Downloads/diabetes_data_upload.csv")
+
+# View the first few rows of the dataset
+head(data)
+
+# Check the column names in the dataset
+print(colnames(data))
+
+# Loop over every column in df
+for (colname in names(data)) {
+  if (colname == "class") next 
+  # Only proceed if the column is factor or character
+  if (is.factor(data[[colname]]) || is.character(data[[colname]])) {
+    
+    # Get the unique non-missing values in this column
+    vals <- unique(na.omit(data[[colname]]))
+    
+    # Check if these values are exactly "Yes" or "No"
+    if (all(vals %in% c("Yes", "No"))) {
+      
+      # Convert: Yes -> 1, No -> 2
+      data[[colname]] <- ifelse(data[[colname]] == "Yes", 1, 2)
+      
+      # Optionally convert to numeric (if they end up as character)
+      data[[colname]] <- as.numeric(data[[colname]])
+    }
+  }
+}
+
+# Calculate prior probabilities
+prior_counts <- data %>%
+  group_by(class) %>%
+  summarise(count = n(), .groups = 'drop') %>%
+  mutate(prior = count / sum(count))
+
+# Print prior probabilities
+print(prior_counts)
+
+# List of features to calculate posterior probabilities for
+features <- c("Polyuria", 
+              "Polydipsia", 
+              "sudden_weight_loss",  # Check if this matches the actual column name
+              "weakness",
+              "Polyphagia",
+              "Genital_thrush",
+              "visual_blurring",
+              "Itching",
+              "Irritability",
+              "delayed_healing",
+              "partial_paresis",
+              "muscle_stiffness",
+              "Alopecia",
+              "Obesity")
+
+# Initialize an empty list to store posterior results
+posterior_results <- list()
+
+# Loop through each feature to calculate posterior probabilities
+for (feature in features) {
+  # Check if the feature exists in the dataset
+  if (feature %in% colnames(data)) {
+    # Calculate likelihoods
+    likelihood_counts <- data %>%
+      group_by(!!sym(feature), class) %>%
+      summarise(count = n(), .groups = 'drop') %>%
+      spread(class, count, fill = 0) %>%
+      mutate(likelihood_yes = Positive / (Positive + Negative),
+             likelihood_no = Negative / (Positive + Negative))
+
+    # Calculate posterior probabilities
+    posterior <- likelihood_counts %>%
+      mutate(posterior_yes = (likelihood_yes * prior_counts$prior[1]) / 
+               (likelihood_yes * prior_counts$prior[1] + likelihood_no * prior_counts$prior[2]),
+             posterior_no = (likelihood_no * prior_counts$prior[2]) / 
+               (likelihood_yes * prior_counts$prior[1] + likelihood_no * prior_counts$prior[2])) %>%
+      select(!!sym(feature), posterior_yes)
+
+    # Store the results in the list
+    posterior_results[[feature]] <- posterior
+  } else {
+    warning(paste("Feature", feature, "not found in the dataset."))
+  }
+}
+
+# Combine all posterior results into a single data frame
+posterior_combined <- bind_rows(posterior_results, .id = "Feature")
+
+# Print combined posterior probabilities
+print(posterior_combined)
+
+# Visualization of prior and posterior probabilities for each feature
+# Combine prior and posterior data for visualization
+prior_posterior_list <- lapply(features, function(feature) {
+  prior_data <- prior_counts %>%
+    rename(Probability = prior) %>%
+    mutate(Type = "Prior", Feature = feature)
+  
+  if (feature %in% colnames(posterior_combined)) {
+    posterior_data <- posterior_combined %>%
+      filter(Feature == feature) %>%
+      rename(Probability = posterior_yes) %>%
+      mutate(Type = "Posterior")
+    
+    bind_rows(prior_data, posterior_data)
+  } else {
+    return(NULL)  # Return NULL if the feature is not found
+  }
+})
+
+# Combine all prior and posterior data, removing NULLs
+prior_posterior <- bind_rows(prior_posterior_list)
+
+# Plotting
+ggplot(prior_posterior, aes(x = Feature, y = Probability, fill = Type)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  labs(title = "Prior and Posterior Probabilities for Features",
+       x = "Feature",
+       y = "Probability") +
+  theme_minimal() +
+  scale_fill_manual(values = c("Prior" = "blue", "Posterior" = "orange")) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+Comparison Between Prior and Posterior:
+
+Posterior probabilities are generally higher than prior probabilities for most features. This suggests that the new evidence (possibly from additional data) has influenced the predictions significantly.
+Notable Features:
+
+Polyphagia has the highest posterior probability, indicating it is strongly supported by the data.
+Irritability and weakness also show notable increases in posterior probabilities compared to their prior probabilities.
+Similarities & Differences:
+
+Alopecia and Itching show less change between prior and posterior probabilities, suggesting these features may not be as strongly influenced by new evidence as others.
+
+
+```{r}
+# -------------------------------------------------------------
+# 1. Load libraries
+# -------------------------------------------------------------
+#install.packages("tidyverse")
+library(tidyverse)  # For data wrangling
+library(brms)       # For Bayesian modeling (front-end to Stan)
+library(bayesplot)  # For posterior visualization checks
+
+# -------------------------------------------------------------
+# 2. Load and prepare the dataset
+# -------------------------------------------------------------
+# Replace with the correct path to your CSV if necessary
+df <- read.csv("C:/Users/Sourav/Downloads/diabetes_data_upload.csv")
+
+# Optionally, inspect the dataset
+summary(df)
+str(df)
+
+# Example: If you have a binary outcome column, e.g. 'Outcome'
+# make sure it's appropriately coded as 0/1 or a factor with two levels.
+# data$Outcome <- factor(data$Outcome, levels = c("Negative", "Positive"))
+
+# -------------------------------------------------------------
+# 3. Specify priors (optional but recommended for Bayesian models)
+# -------------------------------------------------------------
+# Example: a weakly informative prior on regression coefficients
+my_priors <- set_prior("normal(0, 1)", class = "b") + 
+         set_prior("normal(0, 1)", class = "Intercept")
+
+# -------------------------------------------------------------
+# 4. Fit a Bayesian model
+# -------------------------------------------------------------
+# Example logistic regression if you have a binary outcome (0/1)
+# Change 'Age', 'BMI', etc. to the predictor columns in your data
+# If your outcome is indeed binary, use family = bernoulli(link = "logit")
+fit_model <- brm(
+  formula = class ~ Polydipsia + Polyuria + Irritability + Itching + Obesity,
+  data    = df,
+  family  = bernoulli(link = "logit"),  # For a binary outcome
+  prior   = my_priors,                  # If you defined priors
+  chains  = 4,       # Number of Markov chains
+  iter    = 2000,    # Total iterations per chain
+  warmup  = 1000,    # Number of warmup (burn-in) iterations
+  cores   = 4        # Parallel cores (adjust as needed)
+)
+
+# -------------------------------------------------------------
+# 5. Examine model results
+# -------------------------------------------------------------
+summary(fit_model)       # Posterior summaries
+print(prior_summary(fit_model))  # Shows the priors in use
+
+# Posterior predictive checks
+# Compare observed vs. simulated data distribution
+pp_check(fit_model, type = "dens_overlay")
+
+# -------------------------------------------------------------
+# 6. Visualize posterior estimates
+# -------------------------------------------------------------
+# Posterior intervals for coefficients
+plot(fit_model)
+
+# -------------------------------------------------------------
+# End of example script
+# -------------------------------------------------------------
+
+```
+
+```{r}
+# For more advanced posterior checks, bayesplot functions:
+variables(as_draws(fit_model))
+
+
+color_scheme_set("brightblue")
+mcmc_trace(as.array(fit_model), pars = c("b_Intercept", "b_PolydipsiaYes","b_PolyuriaYes" ,"b_IrritabilityYes", "b_ItchingYes", "b_ObesityYes", "Intercept", "lprior", "lp__" ))
+mcmc_dens_overlay(as.array(fit_model), pars = c("b_Intercept", "b_PolydipsiaYes","b_PolyuriaYes" ,"b_IrritabilityYes", "b_ItchingYes", "b_ObesityYes", "Intercept", "lprior", "lp__"))
+```
+
+```{r}
+plot(fixef(fit_model, summary = TRUE))
+```
+
+```{r}
+pp_check(fit_model,type = "bars")
+```
+
+```{r}
+pp_check(fit_model, type = "dens_overlay")
+```
+
+```{r}
+# Scatter plot of residuals (observed - replicated predictions)
+pp_check(fit_model, type = "error_scatter_avg")
+```
+
+
+```{r}
+# Histogram of predicted responses
+pp_check(fit_model, type = "hist")
+```
+
+
+```{r}
+pp_check(fit_model, type = "hist") +
+  geom_histogram(binwidth = 0.05) +
+  theme_minimal() +
+  theme(axis.text = element_text(size = 8))
+```
+
+
+```{r}
+# Plot marginal effects of predictors
+ce <- conditional_effects(fit_model, method = "posterior_epred")
+plot(ce, points = TRUE)
+```
+
+
+
+```{r}
+# Extract posterior predictions
+predictions <- posterior_predict(fit_model)
+
+# Create a scatterplot of observed vs predicted outcomes
+obs_vs_pred <- data.frame(
+  observed = fit_model$data$tipo,  
+  predicted = apply(predictions, 2, mean) # Mean prediction across samples
+)
+
+ggplot(obs_vs_pred, aes(x = observed, y = predicted, color = as.factor(observed))) +
+  geom_jitter(width = 0.05, alpha = 0.7, size = 2) +
+  geom_abline(slope = 1, intercept = 0, color = "red", linetype = "dashed") +
+  labs(x = "Observed", y = "Predicted", color = "Observed Class") +
+  theme_minimal(base_size = 14)
+```
+
+```{r}
+data
+```
+
+```{r}
+# -------------------------------------------------------------
+# 1. Load Required Libraries
+# -------------------------------------------------------------
+library(tidyverse)   # Data manipulation
+library(brms)        # Bayesian regression modeling
+library(bayesplot)   # MCMC diagnostics and posterior visualization
+
+
+# Convert outcome variable to binary (Adjust if different in your dataset)
+# Assuming "class" is the target variable with "Positive" and "Negative" values
+data$class <- as.factor(data$class)  
+
+# Convert "Positive" to 1 and "Negative" to 0 (if needed)
+data$class <- ifelse(data$class == "Positive", 1, 0)
+# Loop over every column in df
+for (colname in names(data)) {
+  if (colname == "class") next 
+  # Only proceed if the column is factor or character
+  if (is.factor(data[[colname]]) || is.character(data[[colname]])) {
+    
+    # Get the unique non-missing values in this column
+    vals <- unique(na.omit(data[[colname]]))
+    
+    # Check if these values are exactly "Yes" or "No"
+    if (all(vals %in% c("Yes", "No"))) {
+      
+      # Convert: Yes -> 1, No -> 2
+      data[[colname]] <- ifelse(data[[colname]] == "Yes", 1, 2)
+      
+      # Optionally convert to numeric (if they end up as character)
+      data[[colname]] <- as.numeric(data[[colname]])
+    }
+  }
+}
+
+# Check the factor levels
+table(data$class)  
+
+# -------------------------------------------------------------
+# 3. Define Priors (Optional but Recommended)
+# -------------------------------------------------------------
+my_priors <- c(
+  set_prior("normal(0, 1)", class = "b"),    # Prior for coefficients
+  set_prior("normal(0, 2.5)", class = "Intercept")  # Prior for intercept
+)
+
+# -------------------------------------------------------------
+# 4. Fit the Bayesian Probit Regression Model
+# -------------------------------------------------------------
+fit_probit <- brm(
+  formula = class ~  Age + Polydipsia + Polyuria + Irritability + Itching + Obesity,  # Adjust variables as needed
+  data    = data,
+  family  = bernoulli(link = "probit"),  # Probit regression for binary classification
+  prior   = my_priors,  
+  chains  = 4,      # Number of Markov Chains
+  iter    = 2000,   # Total iterations per chain
+  warmup  = 1000,   # Warm-up iterations (burn-in)
+  cores   = 4,      # Parallel computation
+  seed    = 1234    # Ensure reproducibility
+)
+
+# -------------------------------------------------------------
+# 5. Model Summary and Posterior Estimates
+# -------------------------------------------------------------
+summary(fit_probit)       # Print model summary
+prior_summary(fit_probit) # Show priors used
+
+# Get fixed effects estimates (population-level effects)
+fixef(fit_probit)
+
+# Check the first few posterior samples
+head(posterior_samples(fit_probit))
+
+# -------------------------------------------------------------
+# 6. Posterior Predictive Checks (Model Diagnostics)
+# -------------------------------------------------------------
+# Density overlay of observed vs predicted values
+pp_check(fit_probit, type = "dens_overlay")
+
+# Histogram of simulated posterior predictions
+pp_check(fit_probit, type = "hist")
+
+```
+
+
+```{r}
+# -------------------------------------------------------------
+# 7. Convergence Diagnostics and Visualization
+# -------------------------------------------------------------
+# Check if chains have converged (Trace Plots)
+# Get all parameter names in the model
+variables(as_draws(fit_probit))
+
+mcmc_trace(as_draws(fit_probit), 
+           pars = c("b_Intercept" , "b_Age",  "b_Polydipsia"  , "b_Polyuria"    , "b_Irritability", "b_Itching",      "b_Obesity" ,     "Intercept" ,     "lprior"    ,     "lp__"))
+
+
+# Posterior Density Overlays
+mcmc_dens_overlay(as.array(fit_probit), 
+                  pars = c("b_Intercept"  ,"b_Age",  "b_Polydipsia"  , "b_Polyuria"    , "b_Irritability", "b_Itching",      "b_Obesity" ,     "Intercept" ,     "lprior"    ,     "lp__" ))
+
+# Posterior Intervals
+plot(fit_probit)
+
+# -------------------------------------------------------------
+# 8. Compare Logit vs. Probit Model Performance (Optional)
+# -------------------------------------------------------------
+# If you also fitted a logistic regression model (logit link), compare using LOO
+ fit_logit <- brm(class ~ Polydipsia + Polyuria + Irritability + Itching + Obesity, data = data, family = bernoulli(link = "logit"))
+
+
+```
+
+```{r}
+# Compute Leave-One-Out Cross-Validation (LOO) for each model
+loo_probit <- loo(fit_probit)
+loo_logit  <- loo(fit_logit)
+
+
+# Compare models
+loo_compare(loo_probit, loo_logit)
+
+
+```
+
+```{r}
+# -------------------------------------------------------------
+# 9. Bayesian Hypothesis Testing
+# -------------------------------------------------------------
+# Example: Check if age is positively associated with diabetes
+hypothesis(fit_probit, "Age > 0")
+
+# -------------------------------------------------------------
+# 10. Save Model for Future Use
+# -------------------------------------------------------------
+saveRDS(fit_probit, file = "fit_probit_model.rds")
+
+# To reload the model later:
+fit_probit <- readRDS("fit_probit_model.rds")
+```
+
+```{r}
+# Extract posterior predictive distributions
+y_rep1 <- posterior_predict(fit_probit)
+y_rep2 <- posterior_predict(fit_logit)
+
+# Ensure correct outcome variable (use `class` instead of `tipo`)
+y <- c(fit_probit$data$class, fit_logit$data$class)
+
+# Ensure posterior predictions have the correct dimensions
+n_samples <- min(ncol(y_rep1), ncol(y_rep2))  # Align both models
+y_rep1 <- y_rep1[, 1:n_samples]
+y_rep2 <- y_rep2[, 1:n_samples]
+
+# Compute mean of posterior predictions
+y_rep_mean <- c(apply(y_rep1, 2, mean), apply(y_rep2, 2, mean))
+
+# Create a data frame for combined plot
+combined_data <- data.frame(
+  y = y,  # Corrected outcome variable
+  model = rep(c("Probit Model", "Logit Model"), each = length(y_rep_mean) / 2),
+  y_rep_mean = y_rep_mean
+)
+
+# Load ggplot2
+library(ggplot2)
+
+ggplot(combined_data, aes(x = y_rep_mean, fill = model, color = model)) +
+  geom_density(alpha = 0.3) +
+  scale_x_log10() +  # Log transform x-axis
+  labs(title = "Density Overlay Comparison (Log Scale)",
+       x = "Predicted Values (Log Scale)", y = "Density") +
+  theme_minimal()
+
+
+```

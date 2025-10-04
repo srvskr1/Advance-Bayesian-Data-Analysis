@@ -1,0 +1,398 @@
+---
+output:
+  html_document: default
+  pdf_document: default
+---
+
+
+
+```{r}
+library(tidyverse)   # Data manipulation
+library(brms)        # Bayesian regression modeling
+library(bayesplot)   # MCMC diagnostics and posterior visualization
+library(ggplot2)
+```
+
+```{r}
+
+
+# Read the dataset from the CSV file
+data <- read_csv("C:/Users/Sourav/Downloads/diabetes_data_upload.csv")
+
+# Inspect the data
+print(head(data))        # View the first few rows
+str(data)                # Check the structure of the data
+summary(data)            # Get summary statistics
+
+# Check for missing values
+missing_vals <- sapply(data, function(x) sum(is.na(x)))
+missing_vals
+
+# Remove duplicate rows
+data <- distinct(data)
+
+# Convert "Yes"/"No" columns to 1/0
+# Identify the columns that contain Yes/No responses
+yes_no_cols <- c(
+  "Polyuria", "Polydipsia", "sudden weight loss", "weakness", "Polyphagia",
+  "Genital thrush", "visual blurring", "Itching", "Irritability",
+  "delayed healing", "partial paresis", "muscle stiffness",
+  "Alopecia", "Obesity"
+)
+
+# Convert Yes -> 1, No -> 0
+data[yes_no_cols] <- lapply(data[yes_no_cols], function(col) {
+  ifelse(col == "Yes", 1, 0)
+})
+
+# Convert "Positive"/"Negative" in 'class' column to 1/0
+data$class <- ifelse(data$class == "Positive", 1, 0)
+
+# Inspect the transformed data
+head(data)
+str(data)
+
+```
+
+```{r}
+# Histogram of Age
+ggplot(data, aes(x = Age)) +
+  geom_histogram(binwidth = 5, fill = "steelblue", color = "white") +
+  labs(title = "Distribution of Age", x = "Age", y = "Count")
+
+# Bar plot of Gender (if still categorical)
+# If you converted Gender to 1/0, you can factor it first or skip this step
+ggplot(data, aes(x = Gender)) +
+  geom_bar(fill = "tan", color = "black") +
+  labs(title = "Distribution of Gender", x = "Gender", y = "Count")
+
+# Bar plot of 'class' (after conversion to 1/0)
+ggplot(data, aes(x = factor(class))) +
+  geom_bar(fill = "darkgreen", color = "black") +
+  labs(title = "Distribution of Diabetes Class", x = "Class (0 = Negative, 1 = Positive)", y = "Count")
+
+# Correlation Heatmap (Optional)
+# For correlation, all columns must be numeric.
+# If Gender is still categorical (M/F), convert it to 1/0 as shown above
+numeric_data <- data %>%
+  mutate(Gender = ifelse(Gender == "Male" | Gender == 1, 1, 0))  # ensure numeric
+# Calculate correlation matrix
+corr_mat <- cor(numeric_data)
+# Melt the correlation matrix for ggplot
+library(reshape2)
+melted_corr <- melt(corr_mat)
+# Plot heatmap
+ggplot(melted_corr, aes(x = Var1, y = Var2, fill = value)) +
+  geom_tile() +
+  scale_fill_gradient2(low = "blue", mid = "white", high = "red", midpoint = 0) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  labs(title = "Correlation Heatmap")
+
+```
+
+```{r}
+data <- data %>%
+  rename(
+    sudden_weight_loss = `sudden weight loss`,
+    Genital_thrush = `Genital thrush`,
+    visual_blurring = `visual blurring`,
+    delayed_healing = `delayed healing`,
+    partial_paresis = `partial paresis`,
+    muscle_stiffness = `muscle stiffness`
+  )
+
+# -------------------------------------------------------------
+# 1. Check Factor Levels
+# -------------------------------------------------------------
+table(data$class)  
+
+# -------------------------------------------------------------
+# 2. Define Priors 
+# -------------------------------------------------------------
+my_priors <- c(
+  set_prior("normal(0, 1)", class = "b"),         # Prior for coefficients
+  set_prior("normal(0, 2.5)", class = "Intercept")  # Prior for intercept
+)
+
+# -------------------------------------------------------------
+# 3. Fit the Bayesian Logit Regression Model
+# -------------------------------------------------------------
+fit_logit <- brm(
+  formula = class ~ Age + Polyuria + Polydipsia + sudden_weight_loss + weakness + Polyphagia + 
+            Genital_thrush + visual_blurring + Itching + Irritability + 
+            delayed_healing + partial_paresis + muscle_stiffness + 
+            Alopecia + Obesity, 
+  data    = data,
+  family  = bernoulli(link = "logit"),  # Logit regression for binary classification
+  prior   = my_priors,  
+  chains  = 4,      # Number of Markov Chains
+  iter    = 2000,   # Total iterations per chain
+  warmup  = 1000,   # Warm-up iterations (burn-in)
+  cores   = 4,      # Parallel computation
+  seed    = 1234    # Ensure reproducibility
+)
+
+# -------------------------------------------------------------
+# 4. Model Summary and Posterior Estimates
+# -------------------------------------------------------------
+summary(fit_logit)       # Print model summary
+prior_summary(fit_logit) # Show priors used
+
+# Get fixed effects estimates (population-level effects)
+fixef(fit_logit)
+
+# Check the first few posterior samples
+head(posterior_samples(fit_logit))
+
+# -------------------------------------------------------------
+# 5. Posterior Predictive Checks (Model Diagnostics)
+# -------------------------------------------------------------
+# Density overlay of observed vs predicted values
+pp_check(fit_logit, type = "dens_overlay")
+
+# Histogram of simulated posterior predictions
+pp_check(fit_logit, type = "hist")
+
+
+
+```
+
+```{r}
+pp_check(fit_logit, type = "error_scatter_avg")
+```
+
+```{r}
+# Check if chains have converged (Trace Plots)
+# Get all parameter names in the model
+variables(as_draws(fit_logit))
+
+mcmc_trace(as_draws(fit_logit), 
+           pars = c("b_Intercept" , "b_Age",  "b_Polydipsia", "b_Polyuria", "b_sudden_weight_loss", "b_weakness" , "b_Polyphagia" , "b_Genital_thrush" , "b_visual_blurring",     "b_visual_blurring" , "b_Itching", "b_Irritability", "b_delayed_healing" , "b_partial_paresis" , "b_muscle_stiffness" , "b_Alopecia" , "b_Obesity" ,     "Intercept" ,     "lprior"    ,     "lp__"))
+
+
+# Posterior Density Overlays
+mcmc_dens_overlay(as.array(fit_logit), 
+                  pars = c("b_Intercept" , "b_Age",  "b_Polydipsia", "b_Polyuria", "b_sudden_weight_loss", "b_weakness" , "b_Polyphagia" , "b_Genital_thrush" , "b_visual_blurring",     "b_visual_blurring" , "b_Itching", "b_Irritability", "b_delayed_healing" , "b_partial_paresis" , "b_muscle_stiffness" , "b_Alopecia" , "b_Obesity" ,     "Intercept" ,     "lprior"    ,     "lp__" ))
+
+# Posterior Intervals
+plot(fit_logit)
+
+mcmc_plot(fit_logit, type = "rhat")
+mcmc_plot(fit_logit, type = "neff")
+```
+
+```{r}
+#Plot the relationship between observed and predicted values
+
+data$predicted_Logit <- fitted(fit_logit)[, "Estimate"]
+
+
+# Logistic Regression
+ggplot(data, aes(x = class, y = predicted_Logit)) +
+  geom_jitter(width = 0.1, height = 0) +
+  geom_smooth(method = "lm", formula = y ~ x, color = "blue") +
+  geom_abline(slope = 1, intercept = 0, color = "red", linetype = "dashed") +
+  labs(x = "Observed", y = "predicted_Logit", color = "Observed Class") +
+  theme_minimal(base_size = 12)
+
+```
+
+```{r}
+# -------------------------------------------------------------
+# 4. Fit the Bayesian Probit Regression Model
+# -------------------------------------------------------------
+fit_probit <- brm(
+  formula = class ~ Age + Polyuria + Polydipsia + sudden_weight_loss + weakness + Polyphagia + 
+            Genital_thrush + visual_blurring + Itching + Irritability + 
+            delayed_healing + partial_paresis + muscle_stiffness + 
+            Alopecia + Obesity,
+  data    = data,
+  family  = bernoulli(link = "probit"),  # Probit regression for binary classification
+  prior   = my_priors,  
+  chains  = 4,      # Number of Markov Chains
+  iter    = 2000,   # Total iterations per chain
+  warmup  = 1000,   # Warm-up iterations (burn-in)
+  cores   = 4,      # Parallel computation
+  seed    = 1234    # Ensure reproducibility
+)
+
+# -------------------------------------------------------------
+# 5. Model Summary and Posterior Estimates
+# -------------------------------------------------------------
+summary(fit_probit)       # Print model summary
+prior_summary(fit_probit) # Show priors used
+
+# Get fixed effects estimates (population-level effects)
+fixef(fit_probit)
+
+# Check the first few posterior samples
+head(posterior_samples(fit_probit))
+
+# -------------------------------------------------------------
+# 6. Posterior Predictive Checks (Model Diagnostics)
+# -------------------------------------------------------------
+# Density overlay of observed vs predicted values
+pp_check(fit_probit, type = "dens_overlay")
+
+# Histogram of simulated posterior predictions
+pp_check(fit_probit, type = "hist")
+pp_check(fit_probit, type = "error_scatter_avg")
+```
+
+```{r}
+# -------------------------------------------------------------
+# 7. Convergence Diagnostics and Visualization
+# -------------------------------------------------------------
+# Check if chains have converged (Trace Plots)
+# Get all parameter names in the model
+variables(as_draws(fit_probit))
+
+mcmc_trace(as_draws(fit_probit), 
+           pars = c("b_Intercept" , "b_Age",  "b_Polydipsia", "b_Polyuria", "b_sudden_weight_loss", "b_weakness" , "b_Polyphagia" , "b_Genital_thrush" , "b_visual_blurring",     "b_visual_blurring" , "b_Itching", "b_Irritability", "b_delayed_healing" , "b_partial_paresis" , "b_muscle_stiffness" , "b_Alopecia" , "b_Obesity" ,     "Intercept" ,     "lprior"    ,     "lp__"))
+
+
+# Posterior Density Overlays
+mcmc_dens_overlay(as.array(fit_probit), 
+                  pars = c("b_Intercept" , "b_Age",  "b_Polydipsia", "b_Polyuria", "b_sudden_weight_loss", "b_weakness" , "b_Polyphagia" , "b_Genital_thrush" , "b_visual_blurring",     "b_visual_blurring" , "b_Itching", "b_Irritability", "b_delayed_healing" , "b_partial_paresis" , "b_muscle_stiffness" , "b_Alopecia" , "b_Obesity" ,     "Intercept" ,     "lprior"    ,     "lp__" ))
+
+# Posterior Intervals
+plot(fit_probit)
+mcmc_plot(fit_probit, type = "rhat")
+mcmc_plot(fit_probit, type = "neff")
+```
+```{r}
+#Plot the relationship between observed and predicted values
+
+data$predicted_Provit <- fitted(fit_probit)[, "Estimate"]
+
+
+# Logistic Regression
+ggplot(data, aes(x = class, y = predicted_Provit)) +
+  geom_jitter(width = 0.1, height = 0) +
+  geom_smooth(method = "lm", formula = y ~ x, color = "blue") +
+  geom_abline(slope = 1, intercept = 0, color = "red", linetype = "dashed") +
+  labs(x = "Observed", y = "predicted_Provit", color = "Observed Class") +
+  theme_minimal(base_size = 12)
+```
+
+
+```{r}
+# Compute Leave-One-Out Cross-Validation (LOO) for each model
+loo_probit <- loo(fit_probit,moment_match = TRUE,reloo = TRUE)
+loo_logit  <- loo(fit_logit,moment_match = TRUE,reloo = TRUE)
+
+
+# Compare models
+loo_compare(loo_probit, loo_logit)
+
+```
+
+```{r}
+#Compare Model Coefficients (Fixed Effects Estimates)
+# Extract fixed effects (posterior means & intervals)
+logit_coef <- fixef(fit_logit)
+probit_coef <- fixef(fit_probit)
+
+# Print comparison of coefficients
+print("Logit Model Coefficients:")
+print(logit_coef)
+
+print("Probit Model Coefficients:")
+print(probit_coef)
+
+```
+
+```{r}
+#Compare Model Fit (LOO & WAIC)
+# Compute model fit criteria
+logit_fit <- loo(fit_logit)
+probit_fit <- loo(fit_probit)
+
+waic_logit <- waic(fit_logit)
+waic_probit <- waic(fit_probit)
+
+# Compare LOO scores
+print("Logit Model LOO Score:")
+print(logit_fit)
+
+print("Probit Model LOO Score:")
+print(probit_fit)
+
+# Compare WAIC scores
+print("Logit Model WAIC Score:")
+print(waic_logit)
+
+print("Probit Model WAIC Score:")
+print(waic_probit)
+
+```
+
+```{r}
+#Compare Posterior Predictive Checks
+# Posterior predictive checks for Logit Model
+pp_check(fit_logit, type = "dens_overlay") +
+  ggtitle("Posterior Predictive Check - Logit")
+
+# Posterior predictive checks for Probit Model
+pp_check(fit_probit, type = "dens_overlay") +
+  ggtitle("Posterior Predictive Check - Probit")
+
+```
+
+```{r}
+#Compare Marginal Effects
+# Marginal effects for Logit Model
+plot(conditional_effects(fit_logit), points = TRUE)
+
+# Marginal effects for Probit Model
+plot(conditional_effects(fit_probit), points = TRUE)
+
+```
+
+```{r}
+# -------------------------------------------------------------
+# 1. Generate Posterior Predictions for Both Models
+# -------------------------------------------------------------
+logit_preds <- posterior_predict(fit_logit, ndraws = 4000)  # Posterior samples for Logit
+probit_preds <- posterior_predict(fit_probit, ndraws = 4000) # Posterior samples for Probit
+
+# -------------------------------------------------------------
+# 2. Convert Predictions into Data Frames for ggplot
+# -------------------------------------------------------------
+logit_df <- data.frame(Predicted = as.vector(logit_preds), Model = "Logit Model")
+probit_df <- data.frame(Predicted = as.vector(probit_preds), Model = "Probit Model")
+
+# Combine both predictions into one dataset
+combined_preds <- bind_rows(logit_df, probit_df)
+
+# -------------------------------------------------------------
+# 3. Plot Density Overlay Comparison
+# -------------------------------------------------------------
+ggplot(combined_preds, aes(x = Predicted, fill = Model)) +
+  geom_density(alpha = 0.5) +
+  labs(title = "Density Overlay Comparison", x = "Predicted Values", y = "Density") +
+  scale_fill_manual(values = c("blue", "red")) +
+  theme_minimal()
+
+```
+```{r}
+# -------------------------------------------------------------
+# 1. Create Data Frame for ELPD Visualization
+# -------------------------------------------------------------
+comparison_data <- data.frame(
+  Model = c("Model 1 (Logit)", "Model 2 (Probit)"),  # Model names
+  ELPD = c(0, -0.4),   # elpd_diff values from your output
+  SE = c(0.0, 1.4)     # Standard error from your output
+)
+
+# -------------------------------------------------------------
+# 2. Plot ELPD Differences with Error Bars
+# -------------------------------------------------------------
+ggplot(comparison_data, aes(x = Model, y = ELPD)) +
+  geom_point(size = 4, color = "red") +  # Blue points for ELPD
+  geom_errorbar(aes(ymin = ELPD - SE, ymax = ELPD + SE), width = 0.2) +  # Error bars
+  ggtitle("ELPD Differences Between Models") +
+  theme_minimal()
+```
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
